@@ -360,8 +360,10 @@ app.registerExtension({
             gl.enable(gl.DEPTH_TEST);
             gl.disable(gl.BLEND);
 
+            // Get point size from widget
+            const pointSize = st.data?.point_size || 3.0;
             gl.uniformMatrix4fv(gl.getUniformLocation(prog, "u_mvp"), false, mvp);
-            gl.uniform1f(gl.getUniformLocation(prog, "u_pointSize"), 3.0);
+            gl.uniform1f(gl.getUniformLocation(prog, "u_pointSize"), pointSize);
 
             // Position
             const aPos = gl.getAttribLocation(prog, "a_pos");
@@ -495,6 +497,12 @@ app.registerExtension({
             ctx.font = "12px sans-serif";
             ctx.fillText(st.mode === "points" ? "Mode: Points" : "Mode: Splats", 18, 46);
 
+            // Draw capture button
+            ctx.fillStyle = "#2a5";
+            ctx.fillRect(120, 30, 90, 24);
+            ctx.fillStyle = "#fff";
+            ctx.fillText("Capture", 140, 46);
+
             // Draw WebGL canvas as image
             ctx.drawImage(st.canvas, 4, 60, this.size[0] - 8, this.size[1] - 70);
         };
@@ -507,6 +515,11 @@ app.registerExtension({
                 st.mode = st.mode === "points" ? "splat" : "points";
                 return true;
             }
+            // Capture button
+            if (localPos[0] > 120 && localPos[0] < 210 && localPos[1] > 30 && localPos[1] < 54) {
+                this._captureImage();
+                return true;
+            }
             // Forward mouse to canvas viewport area
             if (localPos[1] > 60) {
                 st.dragging = true;
@@ -515,6 +528,30 @@ app.registerExtension({
                 return true;
             }
             return origOnMouseDown?.apply(this, arguments);
+        };
+
+        nodeType.prototype._captureImage = function () {
+            const st = this._gsplatState;
+            if (!st.canvas) return;
+
+            // Convert canvas to base64 PNG
+            const dataURL = st.canvas.toDataURL("image/png");
+
+            // Find or create the hidden widget for captured image data
+            let widget = this.widgets?.find(w => w.name === "captured_image_data");
+            if (!widget) {
+                widget = this.addWidget("text", "captured_image_data", dataURL, () => {}, {
+                    serialize: true,
+                });
+                widget.hidden = true;
+            }
+            widget.value = dataURL;
+
+            // Queue the node for re-execution to process the captured image
+            if (app.queuePrompt) {
+                console.log("Image captured, queuing prompt...");
+                app.queuePrompt(0, 1);
+            }
         };
 
         const origOnMouseMove = nodeType.prototype.onMouseMove;

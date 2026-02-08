@@ -1,7 +1,9 @@
 import struct
 import json
 import os
+import base64
 import numpy as np
+import torch
 
 
 def parse_ply(filepath):
@@ -180,17 +182,23 @@ class GaussianSplatViewer:
         return {
             "required": {
                 "file_path": ("STRING", {"default": "", "multiline": False}),
+                "point_size": ("FLOAT", {"default": 3.0, "min": 0.5, "max": 20.0, "step": 0.5}),
             },
+            "hidden": {
+                "captured_image_data": "STRING",
+            }
         }
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("IMAGE",)
     OUTPUT_NODE = True
     FUNCTION = "view"
     CATEGORY = "3D/Gaussian Splatting"
 
-    def view(self, file_path):
+    def view(self, file_path, point_size, captured_image_data=""):
         if not file_path or not os.path.isfile(file_path):
-            return {"ui": {"splat_data": [json.dumps({"error": "File not found", "count": 0})]}}
+            # Return empty image
+            empty_img = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+            return {"ui": {"splat_data": [json.dumps({"error": "File not found", "count": 0})]}, "result": (empty_img,)}
 
         ext = os.path.splitext(file_path)[1].lower()
         if ext == ".ply":
@@ -198,9 +206,31 @@ class GaussianSplatViewer:
         elif ext == ".splat":
             splat_data = parse_splat(file_path)
         else:
-            return {"ui": {"splat_data": [json.dumps({"error": f"Unsupported format: {ext}", "count": 0})]}}
+            empty_img = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+            return {"ui": {"splat_data": [json.dumps({"error": f"Unsupported format: {ext}", "count": 0})]}, "result": (empty_img,)}
 
-        return {"ui": {"splat_data": [json.dumps(splat_data)]}}
+        splat_data["point_size"] = point_size
+
+        # Process captured image if available
+        output_image = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+        if captured_image_data:
+            try:
+                # Decode base64 image data (RGBA format from canvas)
+                img_bytes = base64.b64decode(captured_image_data.split(",")[1] if "," in captured_image_data else captured_image_data)
+                # Convert to numpy array
+                img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+                # Decode PNG
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(img_bytes))
+                img_rgb = img.convert("RGB")
+                img_np = np.array(img_rgb).astype(np.float32) / 255.0
+                # Convert to torch tensor [1, H, W, 3]
+                output_image = torch.from_numpy(img_np).unsqueeze(0)
+            except Exception as e:
+                print(f"Error decoding captured image: {e}")
+
+        return {"ui": {"splat_data": [json.dumps(splat_data)]}, "result": (output_image,)}
 
 
 NODE_CLASS_MAPPINGS = {
